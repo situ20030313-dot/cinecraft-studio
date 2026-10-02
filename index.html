@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Minimal Web Video Editor</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #18181b; color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+    .card { background: #27272a; padding: 16px; border-radius: 8px; width: 800px; margin-bottom: 16px; }
+    input, button { padding: 8px 12px; margin: 4px; border-radius: 4px; border: 1px solid #3f3f46; background: #09090b; color: #fff; }
+    button { cursor: pointer; background: #2563eb; border: none; font-weight: bold; }
+    canvas { background: #000; border-radius: 8px; display: block; margin: 10px auto; max-width: 100%; }
+    .timeline-container { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+    .timeline { flex: 1; accent-color: #2563eb; }
+  </style>
+</head>
+<body>
+
+  <!-- Auth Box -->
+  <div class="card" id="authBox">
+    <h3>User Login</h3>
+    <input type="text" id="username" placeholder="Username (e.g. user1)" />
+    <input type="password" id="password" placeholder="Password" />
+    <button onclick="handleLogin()">Login & Start</button>
+    <span id="authStatus" style="margin-left: 10px; color: #a1a1aa;"></span>
+  </div>
+
+  <!-- Video Editor Workspace -->
+  <div class="card" id="editorBox" style="display:none;">
+    <h3>Workspace</h3>
+    <input type="file" id="videoFile" accept="video/mp4" />
+    <button onclick="uploadAndLoadVideo()">Load Video</button>
+    
+    <canvas id="previewCanvas" width="720" height="405"></canvas>
+    <video id="hiddenVideo" style="display: none;" playsinline></video>
+
+    <!-- Controls & Timeline -->
+    <div class="timeline-container">
+      <button id="playBtn" onclick="togglePlay()">Play</button>
+      <input type="range" id="timelineBar" class="timeline" min="0" value="0" step="0.05" oninput="seekVideo(this.value)" />
+      <span id="timeDisplay">00:00 / 00:00</span>
+    </div>
+
+    <div style="margin-top: 12px;">
+      <button onclick="saveProjectState()">Save Timeline State</button>
+      <span id="saveStatus" style="margin-left: 10px; color: #4ade80;"></span>
+    </div>
+  </div>
+
+  <script>
+    let authToken = "";
+    let activeProjectId = null;
+    const video = document.getElementById("hiddenVideo");
+    const canvas = document.getElementById("previewCanvas");
+    const ctx = canvas.getContext("2d");
+    const timelineBar = document.getElementById("timelineBar");
+    const timeDisplay = document.getElementById("timeDisplay");
+    const playBtn = document.getElementById("playBtn");
+
+    async function handleLogin() {
+      const u = document.getElementById("username").value;
+      const p = document.getElementById("password").value;
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: u, password: p })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        authToken = data.access_token;
+        document.getElementById("authStatus").innerText = "Logged in as " + data.username;
+        document.getElementById("editorBox").style.display = "block";
+      } else {
+        alert(data.detail || "Login failed");
+      }
+    }
+
+    async function uploadAndLoadVideo() {
+      const fileInput = document.getElementById("videoFile");
+      if (!fileInput.files[0]) return alert("Video file select karein");
+
+      const formData = new FormData();
+      formData.append("file", fileInput.files[0]);
+
+      const res = await fetch("/api/projects/upload-video?project_name=Project1", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + authToken },
+        body: formData
+      });
+      const data = await res.json();
+      if (res.ok) {
+        activeProjectId = data.project_id;
+        video.src = data.stream_url;
+        video.load();
+      } else {
+        alert("Upload error");
+      }
+    }
+
+    video.addEventListener("loadedmetadata", () => {
+      timelineBar.max = video.duration;
+      renderFrame();
+    });
+
+    video.addEventListener("timeupdate", () => {
+      timelineBar.value = video.currentTime;
+      timeDisplay.innerText = formatTime(video.currentTime) + " / " + formatTime(video.duration);
+    });
+
+    function togglePlay() {
+      if (video.paused) {
+        video.play();
+        playBtn.innerText = "Pause";
+        requestAnimationFrame(renderLoop);
+      } else {
+        video.pause();
+        playBtn.innerText = "Play";
+      }
+    }
+
+    function seekVideo(val) {
+      video.currentTime = val;
+      renderFrame();
+    }
+
+    function renderFrame() {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    }
+
+    function renderLoop() {
+      if (!video.paused && !video.ended) {
+        renderFrame();
+        requestAnimationFrame(renderLoop);
+      }
+    }
+
+    function formatTime(sec) {
+      const m = Math.floor(sec / 60).toString().padStart(2, '0');
+      const s = Math.floor(sec % 60).toString().padStart(2, '0');
+      return m + ":" + s;
+    }
+
+    async function saveProjectState() {
+      if (!activeProjectId) return alert("Pehle video load karein");
+      const state = JSON.stringify({ currentTime: video.currentTime });
+      const res = await fetch("/api/projects/save", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + authToken
+        },
+        body: JSON.stringify({ project_id: activeProjectId, timeline_data: state })
+      });
+      if (res.ok) {
+        document.getElementById("saveStatus").innerText = "Timeline Saved at " + formatTime(video.currentTime);
+      }
+    }
+  </script>
+</body>
+</html>
