@@ -10,7 +10,9 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 
 app = FastAPI(title="Video Editor Backend")
-
+@app.get("/")
+def serve_home():
+    return FileResponse("frontend/index.html")
 @app.on_event("startup")
 def startup():
     init_db()
